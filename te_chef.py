@@ -28,6 +28,10 @@ from ricecooker.utils.html import download_file
 from ricecooker.utils.zip import create_predictable_zip
 from ricecooker import config
 
+LANG = "fr"
+
+class VideoError(Exception):
+    pass
 
 sess = requests.Session()
 cache = FileCache('.webcache')
@@ -61,11 +65,21 @@ class TouchableEarthChef(SushiChef):
         Return the `ChannelNode` for the Touchable Earth for a particular langage.
         """
         if 'lang' not in kwargs:
-            raise ValueError('Must specify lang=?? on the command line. Supported languages are en, fr, ?????.')
-        lang = kwargs['lang']
+            if LANG:
+                lang = LANG
+            else:
+                raise ValueError('Must specify lang=?? on the command line. Supported languages are en, fr, ?????.')
+        else:
+            lang = kwargs['lang']
+
+        # -fr is already taken, so we special-case that here.
+        if lang=='fr':
+            source_lang = 'french'
+        else:
+            source_lang = lang
         channel = nodes.ChannelNode(
             source_domain = 'www.touchableearth.org',
-            source_id = 'touchable-earth-%s' % lang,
+            source_id = 'touchable-earth-%s' % source_lang,
             title = 'Touchable Earth (%s)' % lang,
             thumbnail = 'https://d1iiooxwdowqwr.cloudfront.net/pub/appsubmissions/20140218003206_PROFILEPHOTO.jpg',
             description = 'Where kids teach kids about the world. Taught entirely by school age children in short videos, Touchable Earth promotes tolerance for gender, culture, and identity.',
@@ -91,7 +105,6 @@ def add_countries_to_channel(channel, language):
         href = place["href"]
         url = "%s?lang=%s" % (href, language)
         channel.add_child(scrape_country(title, url, language))
-
 
 def scrape_country(title, country_url, language):
     """
@@ -121,7 +134,7 @@ def add_topics_to_country(doc, country_node, language):
     topic_options = doc.select(".sub_cat_dropdown .select_option_subcat option")
     topic_urls_added = set()
 
-    for i, option in enumerate(topic_options):
+    for _, option in enumerate(topic_options):
         if option.has_attr("selected"):
             continue
 
@@ -244,7 +257,7 @@ def overlay_and_watermark_video(filename, youtube_id):
         overlay_clip = mpe.ImageClip(overlay_file).set_duration(0.1)
         concat_clips = mpe.concatenate_videoclips([overlay_clip, video_clip])
     else:
-        concat_clips = video_clip
+        concat_clips = mpe.concatenate_videoclips([video_clip])
         print("\t    WARNING: Could not download overlay image file from %s" % overlay_src)
 
     # Now create the watermark logo as a clip ...
@@ -258,8 +271,11 @@ def overlay_and_watermark_video(filename, youtube_id):
     # And then combine it with the video clip.
     composite = mpe.CompositeVideoClip([concat_clips, logo])
     composite.duration = concat_clips.duration
-    composite.write_videofile(tempfile_name, threads=4)
-
+    try:
+        composite.write_videofile(tempfile_name, threads=4, audio_codec="aac")
+    except Exception as e:
+        raise VideoError(str(e))
+    
     # Now move the watermarked file to Ricecooker storage and hash its name
     # so it can be validated.
     watermarked_filename = "{}.{}".format(
@@ -282,7 +298,19 @@ class WatermarkedYouTubeVideoFile(files.YouTubeVideoFile):
 
     def process_file(self):
         filename = super(WatermarkedYouTubeVideoFile, self).process_file()
-        self.filename = overlay_and_watermark_video(filename, self.youtube_id)
+        if filename is None:
+            print ("\t\tERROR: Didn't get video")
+            self.error = "Didn't get video"
+            config.FAILED_FILES.append(self)
+            return
+        try:
+            self.filename = overlay_and_watermark_video(filename, self.youtube_id)
+        except VideoError:
+            print ("\t\tERROR: Didn't get video (overlay step)")
+            self.error = "Didn't get video (overlay step)"
+            config.FAILED_FILES.append(self)
+            return
+
         print("\t--- Watermarked ", self.filename)
         return self.filename
 

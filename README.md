@@ -12,6 +12,7 @@
 * Create a Python3 virtual env `virtualenv -p python3  venv`
   and activate it using `source venv/bin/activate`
 * Run `pip install -r requirements.txt`
+* Run python, and type `import imageio; imageio.plugins.freeimage.download()`
 
 ### Step 1: Obtaining an Authorization Token ###
 You will need an authorization token to create a channel on Kolibri Studio. In order to obtain one:
